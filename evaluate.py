@@ -3,18 +3,99 @@ import argparse
 import numpy as np
 from datetime import datetime
 
-from transformers import AutoTokenizer
-from nltk.translate.bleu_score import corpus_bleu, sentence_bleu
+from transformers import RobertaTokenizer, RobertaForSequenceClassification
+import tqdm
+import torch
+import torch.nn.functional as F
+from torch.nn.utils.rnn import pad_sequence
 
-# TODO: metric implementation
-def calc_sta():
-    raise NotImplementedError
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from nltk.translate.bleu_score import corpus_bleu
 
-def calc_sim():
-    raise NotImplementedError
+from wieting_similarity import *
 
-def calc_fl():
-    raise NotImplementedError
+def wieting_sim(inputs, preds):
+    # assert len(inputs) == len(preds)
+
+    # sim_model = SimilarityEvaluator('./wieting_similarity/sim.pt', './wieting_similarity/sim.sp.30k.model')
+
+    # sim_scores = []
+
+    # for i in tqdm.tqdm(range(0, len(inputs), 64)):
+    #     sim_scores.extend(
+    #         sim_model.find_similarity(inputs[i:i + 64], preds[i:i + 64])
+    #     )
+
+    # return np.array(sim_scores)
+    
+    assert len(inputs) == len(preds)
+
+    sim_model = SimilarityEvaluator('./wieting_similarity/sim.pt', './wieting_similarity/sim.sp.30k.model')
+
+    max_sim_scores = []
+    avg_sim_scores = []
+    for i in tqdm.tqdm(range(len(preds))):
+        sim_score_per_one = []
+        for j in range(len(inputs[i])):
+            # print(inputs[i][j])
+            s = sim_model.find_similarity([inputs[i][j]], [preds[i]])
+            sim_score_per_one.extend(s)
+            
+        avg_sim_scores.append(sum(sim_score_per_one) / len(sim_score_per_one))
+        max_sim_scores.append(max(sim_score_per_one))
+
+    return np.array(avg_sim_scores), np.array(max_sim_scores)
+
+def calc_sta(candidates):
+    results = []
+    
+    tokenizer = RobertaTokenizer.from_pretrained('SkolkovoInstitute/roberta_toxicity_classifier')
+    model = RobertaForSequenceClassification.from_pretrained('SkolkovoInstitute/roberta_toxicity_classifier')
+    for i in tqdm.tqdm(range(0, len(candidates), 64)):
+        batch = tokenizer(candidates[i:i + 64], return_tensors='pt', padding=True)
+        result = model(**batch)['logits'].argmax(1).float().data.tolist()
+        results.extend([1 - item for item in result])
+    accuracy_by_sent = results
+    sta_mean = np.mean(results)
+    
+    return accuracy_by_sent, sta_mean
+
+def calc_sim(references, candidates):
+    """
+    Returns:
+        similarity_by_sent
+        avg_sim_by_sim
+    """
+    avg_similarity_by_sent, max_similarity_by_sent = wieting_sim(references, candidates)
+    avg_avg_sim_by_sent = avg_similarity_by_sent.mean()
+    avg_max_sim_by_sent = max_similarity_by_sent.mean()
+    
+    return avg_similarity_by_sent, avg_avg_sim_by_sent, max_similarity_by_sent, avg_max_sim_by_sent
+
+def calc_fl(candidates):
+    # return cola_acc
+    fl_tokenizer = AutoTokenizer.from_pretrained('textattack/roberta-base-CoLA')
+    fl_model = AutoModelForSequenceClassification.from_pretrained('textattack/roberta-base-CoLA')
+
+    # 입력 토큰화
+    fl_inputs = fl_tokenizer(candidates, return_tensors='pt', padding=True, truncation=True, max_length=512)
+    # 모델 예측
+    with torch.no_grad():
+        fl_outputs = fl_model(**fl_inputs)
+        predicted_class = fl_outputs.logits.argmax(dim=1)
+    # textattack/roberta-base-CoLA에서는 1이 "acceptable"(유창함)
+    cola_acc = predicted_class.sum() / len(predicted_class)
+    cola_stats = list(1 - predicted_class)
+    
+    # # 소프트맥스로 확률값도 계산 (J 스코어 계산용)
+    # probs = F.softmax(fl_outputs.logits, dim=1)
+    # acceptable_prob = probs[0][1]  # 유창함 클래스의 확률
+        
+    return cola_stats, cola_acc
+
+def calc_j(accuracy_by_sent, similarity_by_sent, cola_stats, candidates):
+    return sum(accuracy_by_sent * similarity_by_sent * cola_stats) / len(candidates)
+
 
 def main(args):
     outputs = []
@@ -30,52 +111,46 @@ def main(args):
 
         tokenizer = AutoTokenizer.from_pretrained(args.base_model_name)
 
-        ref_corpus = [[tokenizer.tokenize(sent) for sent in ref] for ref in ref_corpus]
-        ref_sentence = [tokenizer.tokenize(sent) for sent in ref_sentence]
-        candidates = [tokenizer.tokenize(sent) for sent in candidates]
+        ref_corpus_tok = [[tokenizer.tokenize(sent) for sent in ref] for ref in ref_corpus]
+        ref_sentence_tok = [tokenizer.tokenize(sent) for sent in ref_sentence]
+        candidates_tok = [tokenizer.tokenize(sent) for sent in candidates]
         
     elif args.split_type == 'split':
         
-        ref_corpus = [[sent.split(' ') for sent in ref] for ref in ref_corpus]
-        ref_sentence = [sent.split(' ') for sent in ref_sentence]
-        candidates = [sent.split(' ') for sent in candidates]
+        ref_corpus_tok = [[sent.split(' ') for sent in ref] for ref in ref_corpus]
+        ref_sentence_tok = [sent.split(' ') for sent in ref_sentence]
+        candidates_tok = [sent.split(' ') for sent in candidates]
 
     # Calculate BLEU score
-    bleu_corpus_score = corpus_bleu(ref_corpus, candidates)
-    print(bleu_corpus_score)
-    
-    return
+    bleu_corpus_score = corpus_bleu(ref_corpus_tok, candidates_tok)    
 
-    # TODO: metric calculation
     # Calculate STA (style accuracy)
-    sta_corpus_score = calc_sta(ref_corpus, candidates)
-    
+    accuracy_by_sent, sta_score = calc_sta(candidates)
+
     # Calculate SIM (content preservation)
-    sim_corpus_score = calc_sim(ref_corpus, candidates)
+    avg_similarity_by_sent, avg_avg_sim_by_sent, max_similarity_by_sent, avg_max_sim_by_sent = calc_sim(ref_corpus, candidates)
     
     # Calculate FL (fluency)
-    fl_corpus_score = calc_fl(ref_corpus, candidates)
-    
+    cola_stats, fl_score = calc_fl(candidates)
+
     # Aggregate all metrics (J)
-    j_corpus_score = None
-    
-    print("corpus:", bleu_corpus_score)
-    
+    avg_j_score = calc_j(accuracy_by_sent, avg_similarity_by_sent, cola_stats, candidates)
+    max_j_score = calc_j(accuracy_by_sent, max_similarity_by_sent, cola_stats, candidates)
+        
     performance = {
         'base_model_name': args.base_model_name,
         'output_file_name': args.output_file_name,
         'split_type': args.split_type,
-        'bleu_corpus': bleu_corpus_score,
-        # 'bleu_sentence': bleu_sentence_score,
-        'sta_corpus': sta_corpus_score,
-        # 'sta_sentence': sta_sentence_score,
-        'sim_corpus': sim_corpus_score,
-        # 'sim_sentence': sim_sentence_score,
-        'fl_corpus': fl_corpus_score,
-        # 'fl_sentence': fl_sentence_score,
-        'j_corpus': j_corpus_score,
-        # 'j_sentence': j_sentence_score
+        'bleu_corpus': float(bleu_corpus_score),
+        'sta': float(sta_score),
+        'avg_sim': float(avg_avg_sim_by_sent),
+        'max_sim': float(avg_max_sim_by_sent),
+        'fl': float(fl_score),
+        'avg_j': float(avg_j_score),
+        'max_j': float(max_j_score),
     }
+    
+    print(performance)
     
     with open('performance.jsonl', 'a') as f:
         json.dump(performance, f, ensure_ascii=False)
