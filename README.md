@@ -24,5 +24,6 @@ python evaluate.py --base_model_name [BASE_MODEL_NAME] \ # 사용한 LM명
                   --output_file_name \ # 평가하고자 하는 output_file_name 그대로 작성하면 됨. 
 ```
 
+
 ### 추가 설명
 * output file은 `outputs/results_{output_file_name}.jsonl`으로 저장됨
