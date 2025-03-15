@@ -10,8 +10,8 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import (
     T5Tokenizer,
     T5ForConditionalGeneration,
-    AutoTokenizer,
-    AutoModelForCausalLM,
+    # AutoTokenizer,
+    # AutoModelForCausalLM,
     get_linear_schedule_with_warmup
 )
 
