@@ -365,3 +365,12 @@ if __name__ == '__main__':
     set_randomness(args.seed)
     
     main(args)
+
+# CUDA_VISIBLE_DEVICES=0,1 python train.py \
+#   --seed 426 \
+#   --base_model_name meta-llama/Llama-3.1-8B-Instruct \
+#   --output_file_name run_ds \
+#   --use_demo_selection \
+#   --learning_rate 5e-5 \
+#   --batch_size 4 \
+#   --epochs 3

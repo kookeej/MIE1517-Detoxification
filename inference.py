@@ -120,10 +120,8 @@ def main(args):
     ######### EDIT #########
     # model = AutoModelForCausalLM.from_pretrained(args.base_model_name)
     # model.resize_token_embeddings(len(tokenizer), mean_resizing=False)
-    
-    model = AutoModelForCausalLM.from_pretrained(base_model_name)
-    model.resize_token_embeddings(len(tokenizer), mean_resizing=False)
-    model.load_state_dict(torch.load(args.base_model_name))
+    model = AutoModelForCausalLM.from_pretrained(base_tokenizer_name)
+    model.load_adapter(f'./checkpoints/best_run_ds', adapter_name="lora")
 
 
     model.to(device)
