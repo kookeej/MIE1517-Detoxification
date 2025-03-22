@@ -14,20 +14,7 @@ from nltk.translate.bleu_score import corpus_bleu
 
 from wieting_similarity import *
 
-def wieting_sim(inputs, preds):
-    # assert len(inputs) == len(preds)
-
-    # sim_model = SimilarityEvaluator('./wieting_similarity/sim.pt', './wieting_similarity/sim.sp.30k.model')
-
-    # sim_scores = []
-
-    # for i in tqdm.tqdm(range(0, len(inputs), 64)):
-    #     sim_scores.extend(
-    #         sim_model.find_similarity(inputs[i:i + 64], preds[i:i + 64])
-    #     )
-
-    # return np.array(sim_scores)
-    
+def wieting_sim(inputs, preds):    
     assert len(inputs) == len(preds)
 
     sim_model = SimilarityEvaluator('./wieting_similarity/sim.pt', './wieting_similarity/sim.sp.30k.model')
@@ -37,7 +24,6 @@ def wieting_sim(inputs, preds):
     for i in tqdm.tqdm(range(len(preds))):
         sim_score_per_one = []
         for j in range(len(inputs[i])):
-            # print(inputs[i][j])
             s = sim_model.find_similarity([inputs[i][j]], [preds[i]])
             sim_score_per_one.extend(s)
             
