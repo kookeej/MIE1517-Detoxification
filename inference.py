@@ -52,9 +52,14 @@ class ParadetoxDataset(Dataset):
         return len(self.data)
     
     def __getitem__(self, idx):
+        toxic = self.data[idx]['toxic'] # add 유경
         if self.examples is not None:
-            selected_examples = [f"Toxic comment: {x['toxic']}\### Response: {x['reference']}[END]" for x in self.examples[idx]]
-            input_prompt = self.template.format(toxic_comment=self.data[idx]['toxic'], examples='\n'.join(selected_examples))
+            # selected_examples = [f"Toxic comment: {x['toxic']}\### Response: {x['reference']}[END]" for x in self.examples[idx]]
+            # input_prompt = self.template.format(toxic_comment=self.data[idx]['toxic'], examples='\n'.join(selected_examples))
+            ####### edit #######
+            selected = self.examples[idx]
+            demo = "\n".join([f"Toxic comment: {x['toxic']}\n### Response: {x['reference']}[END]" for x in selected])
+            input_prompt = self.template.format(toxic_comment=toxic, examples=demo)
         else:
             input_prompt = self.template.format(toxic_comment=self.data[idx]['toxic'])
             

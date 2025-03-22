@@ -11,13 +11,22 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import (
     T5Tokenizer,
     T5ForConditionalGeneration,
-    # AutoTokenizer,
-    # AutoModelForCausalLM,
+    AutoTokenizer,
+    AutoModelForCausalLM,
     get_linear_schedule_with_warmup
 )
 from peft import LoraConfig, get_peft_model, PeftModel
 
 from utils import set_randomness
+
+# add 유경
+import chromadb
+from sentence_transformers import SentenceTransformer
+
+def similarity_search(retrieval, collection, input_sentence, k=3):
+    input_embedding = retrieval.encode(input_sentence).tolist()
+    results = collection.query(query_embeddings=[input_embedding], n_results=k)
+    return results['metadatas'][0]
 
 
 def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterion, device):
@@ -110,6 +119,7 @@ class ParadetoxDatasetForTrain(Dataset):
         tokenizer,
         device,
         max_length: Optional[int] = 128,
+        examples_list=None, # add 유경
         ):
         
         self.tokenizer = tokenizer
@@ -117,11 +127,27 @@ class ParadetoxDatasetForTrain(Dataset):
         self.device = device
 
         self.data = data
+
+        self.examples_list = examples_list # add 유경
             
     def __len__(self):
         return len(self.data)
     
     def __getitem__(self, idx):
+        toxic = self.data[idx]['toxic']
+        neutral = self.data[idx]['neutral']
+
+        demo_prompt = ""
+        if self.examples_list is not None:
+            selected = self.examples_list[idx]
+            for ex in selected:
+                demo_prompt += f"Toxic comment: {ex['toxic']}\n### Response: {ex['reference']}[END]\n"
+
+        full_prompt = (
+            "Your task is to review the given toxic comment and convert it into a polite, neutral sentence.\n"
+            + demo_prompt +
+            f"Toxic comment: {toxic}\n### Response:"
+        )
         
         if isinstance(self.tokenizer, T5Tokenizer):
             inputs = self.tokenizer.encode_plus(
@@ -228,6 +254,21 @@ def main(args):
         for item in train
         for ref in item['references']
     ]
+    # add 유경
+    if args.use_demo_selection:
+        print("Building DS example list for training...")
+        retrieval = SentenceTransformer('all-MiniLM-L6-v2')
+        chroma_client = chromadb.PersistentClient(path='./chroma_db')
+        collection = chroma_client.get_or_create_collection(name='train_ds_collection')
+        for idx, entry in enumerate(tqdm(train)):
+            embedding = retrieval.encode(entry['toxic']).tolist()
+            collection.add(
+                ids=[str(idx)],
+                embeddings=[embedding],
+                metadatas=[{'toxic': entry['toxic'], 'reference': entry['neutral']}]
+            )
+        train_examples = [similarity_search(retrieval, collection, ex['toxic'], k=3) for ex in tqdm(train)]
+
     
     if 't5' in args.base_model_name:        
         tokenizer = T5Tokenizer.from_pretrained(args.base_model_name)
@@ -311,6 +352,7 @@ def parse_args():
     parser.add_argument('--learning_rate', type=float, default=1e-4)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--use_demo_selection', action='store_true') # add 유경
     
     args = parser.parse_args()
     
