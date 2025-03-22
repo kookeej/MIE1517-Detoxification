@@ -18,6 +18,8 @@ from transformers import (
 
 from utils import set_randomness
 
+import os # add 유경
+
 def similarity_search(retrieval, collection, input_sentence, k):
     input_embedding = retrieval.encode(input_sentence).tolist()
     
@@ -82,6 +84,18 @@ class CustomStoppingCriteria(StoppingCriteria):
     def __call__(self, input_ids, scores, **kwargs):
         return (input_ids[:, -1] == self.stop_token_id).any()
 
+# ############### ADD 유경 #################
+# def load_tokenizer(base_model_path_or_name: str, lora_path: Optional[str] = None):
+#     if os.path.exists(base_model_path_or_name):  # LoRA adapter 폴더
+#         base_tokenizer_name = "meta-llama/Llama-3.1-8B-Instruct"
+#         tokenizer = AutoTokenizer.from_pretrained(base_tokenizer_name, padding_side="left")
+#     else:  # huggingface model name
+#         tokenizer = AutoTokenizer.from_pretrained(base_model_path_or_name, padding_side="left")
+    
+#     tokenizer.add_tokens(["[END]"])
+#     tokenizer.pad_token = tokenizer.eos_token
+#     return tokenizer
+############################################
 
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -90,15 +104,28 @@ def main(args):
         test = json.load(f)
         
     # load tokenizer and model
-    tokenizer = AutoTokenizer.from_pretrained(args.base_model_name, padding_side='left')
+    # tokenizer = AutoTokenizer.from_pretrained(args.base_model_name, padding_side='left')
+    ######## EDIT #########
+    base_model_name = "meta-llama/Llama-3.1-8B-Instruct"
+    tokenizer = AutoTokenizer.from_pretrained(base_model_name, padding_side="left")
+
+    # tokenizer = load_tokenizer(args.base_model_name) # add 유경
+
     tokenizer.add_tokens(['[END]'])
     tokenizer.pad_token = tokenizer.eos_token
 
     stop_token_id = tokenizer.convert_tokens_to_ids('[END]')
     stopping_criteria = StoppingCriteriaList([CustomStoppingCriteria(stop_token_id)])
 
-    model = AutoModelForCausalLM.from_pretrained(args.base_model_name)
+    ######### EDIT #########
+    # model = AutoModelForCausalLM.from_pretrained(args.base_model_name)
+    # model.resize_token_embeddings(len(tokenizer), mean_resizing=False)
+    
+    model = AutoModelForCausalLM.from_pretrained(base_model_name)
     model.resize_token_embeddings(len(tokenizer), mean_resizing=False)
+    model.load_state_dict(torch.load(args.base_model_name))
+
+
     model.to(device)
     
     if args.prompt_type == 'zs':
@@ -183,7 +210,7 @@ def main(args):
             print(generated_text)
             total_preds.extend(generated_text)
 
-    result_list = []
+    # result_list = []
     for i in range(len(total_preds)):
         x = test[i].copy()
         x['generation'] = total_preds[i]
@@ -213,3 +240,8 @@ if __name__ == '__main__':
     set_randomness(args.seed)
     
     main(args)
+
+# python inference.py \
+#   --prompt_type ds \
+#   --output_file_name run_ds_infer \
+#   --base_model_name checkpoints/best_run_ds.pth
