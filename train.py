@@ -17,6 +17,7 @@ from transformers import (
     AutoModelForCausalLM,
     get_linear_schedule_with_warmup
 )
+from torch.amp import autocast, GradScaler
 from peft import LoraConfig, get_peft_model, PeftModel
 
 from dataset import ParadetoxDatasetForTrain, ParadetoxDatasetForEval
@@ -27,6 +28,8 @@ def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterio
     # train
     model.train()
     loss_list = []
+    scaler = GradScaler()
+
     for idx, batch in enumerate(tqdm(dataloader, desc='Training...')):
 
         optimizer.zero_grad()
@@ -39,15 +42,17 @@ def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterio
                 logits.view(-1, logits.size(-1)),
                 batch['labels'].view(-1)
             )
+            raise NotImplementedError
         else:
-            labels = batch['labels']
-            # labels[labels == tokenizer.pad_token_id] = -100
-            outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'], labels=labels)
-            loss = outputs.loss
+            with autocast(device_type='cuda', dtype=torch.bfloat16):
+                for k, v in batch.items():
+                    batch[k] = v.to(device)
+                outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'], labels=batch['labels'])
+                loss = outputs.loss
 
-        loss.backward()
-        optimizer.step()
-        scheduler.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         logger.log({'train/loss': loss.item()})
         loss_list.append(loss.item())
@@ -59,23 +64,27 @@ def generate(dataloader, model, tokenizer):
     model.eval()
     total_preds = []
     with torch.no_grad():
-        for idx, batch in enumerate(tqdm(dataloader, desc='Generating...')):
-            outputs = model.generate(
-                **batch,
-                max_new_tokens=64,
-                num_return_sequences=1,
-                temperature=0.7,
-                top_p=0.9,
-                top_k=50,
-                do_sample=True,
-                eos_token_id=tokenizer.eos_token_id,
-                pad_token_id=tokenizer.pad_token_id,
-            )
+        with autocast(device_type='cuda', dtype=torch.bfloat16):
+            for idx, batch in enumerate(tqdm(dataloader, desc='Generating...')):
+                for k, v in batch.items():
+                    batch[k] = v.to(model.device)
+                outputs = model.generate(
+                    **batch,
+                    max_new_tokens=64,
+                    num_return_sequences=1,
+                    temperature=0.7,
+                    top_p=0.9,
+                    top_k=50,
+                    do_sample=True,
+                    eos_token_id=tokenizer.eos_token_id,
+                    pad_token_id=tokenizer.pad_token_id,
+                )
 
-            generated_text = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-            generated_text = [x.split('Neutral comment: ')[-1].strip().split("\n")[0].strip() for x in generated_text]
+                generated_text = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+                generated_text = [x.split('Neutral comment: ')[-1].strip().split("\n")[0].strip() for x in generated_text]
 
-            total_preds.extend(generated_text)
+                total_preds.extend(generated_text)
+
     return total_preds
 
 def valid_one_epoch(model, dataloader, tokenizer, raw_data, device):
@@ -153,13 +162,13 @@ def main(args):
         model = get_peft_model(model, config)
         model.print_trainable_parameters()
 
-    train_dataset = ParadetoxDatasetForTrain(train, tokenizer, device)
-    valid_dataset = ParadetoxDatasetForEval(valid, tokenizer, device)
-    test_dataset = ParadetoxDatasetForEval(test, tokenizer, device)
+    train_dataset = ParadetoxDatasetForTrain(train, tokenizer)
+    valid_dataset = ParadetoxDatasetForEval(valid, tokenizer)
+    test_dataset = ParadetoxDatasetForEval(test, tokenizer)
 
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False)
-    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False)
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, collate_fn=train_dataset.collate_fn)
+    valid_dataloader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=valid_dataset.collate_fn)
+    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=test_dataset.collate_fn)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     scheduler = get_linear_schedule_with_warmup(optimizer,

@@ -1,20 +1,16 @@
 from typing import Optional
 from transformers import T5Tokenizer
 from torch.utils.data import Dataset
+import torch
 
 class ParadetoxDatasetForTrain(Dataset):
     def __init__(
             self,
             data,
             tokenizer,
-            device,
-            max_length: Optional[int] = 128,
     ):
 
         self.tokenizer = tokenizer
-        self.max_length = max_length
-        self.device = device
-
         self.data = data
 
     def __len__(self):
@@ -53,9 +49,6 @@ class ParadetoxDatasetForTrain(Dataset):
 
             tokenized = self.tokenizer(
                 full_text,
-                max_length=self.max_length,
-                padding='max_length',
-                truncation=True,
                 return_tensors='pt'
             )
 
@@ -68,12 +61,27 @@ class ParadetoxDatasetForTrain(Dataset):
             labels[:prompt_len] = -100
 
             tokenized = {
-                'input_ids': input_ids.to(self.device),
-                'attention_mask': attention_mask.to(self.device),
-                'labels': labels.to(self.device)
+                'input_ids': input_ids,
+                'attention_mask': attention_mask,
+                'labels': labels
             }
 
             return tokenized
+
+    def collate_fn(self, batch):
+        input_ids = [item['input_ids'] for item in batch]
+        attention_mask = [item['attention_mask'] for item in batch]
+        labels = [item['labels'] for item in batch]
+
+        input_ids = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+        attention_mask = torch.nn.utils.rnn.pad_sequence(attention_mask, batch_first=True, padding_value=0)
+        labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value=-100)
+
+        return {
+            'input_ids': input_ids,
+            'attention_mask': attention_mask,
+            'labels': labels
+        }
 
 
 class ParadetoxDatasetForEval(Dataset):
@@ -81,14 +89,9 @@ class ParadetoxDatasetForEval(Dataset):
             self,
             data,
             tokenizer,
-            device,
-            max_length: Optional[int] = 128,
     ):
 
         self.tokenizer = tokenizer
-        self.max_length = max_length
-        self.device = device
-
         self.data = data
 
     def __len__(self):
@@ -118,6 +121,18 @@ class ParadetoxDatasetForEval(Dataset):
                 return_tensors='pt',
             )
 
-        tokenized = {k: v.squeeze(0).to(self.device) for k, v in inputs.items()}
+        tokenized = {k: v.squeeze(0) for k, v in inputs.items()}
 
         return tokenized
+
+    def collate_fn(self, batch):
+        input_ids = [item['input_ids'] for item in batch]
+        attention_mask = [item['attention_mask'] for item in batch]
+
+        input_ids = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+        attention_mask = torch.nn.utils.rnn.pad_sequence(attention_mask, batch_first=True, padding_value=0)
+
+        return {
+            'input_ids': input_ids,
+            'attention_mask': attention_mask,
+        }
