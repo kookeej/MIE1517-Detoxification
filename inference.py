@@ -1,4 +1,6 @@
 import json
+
+import json
 import argparse
 from tqdm import tqdm
 from typing import Optional
@@ -79,6 +81,7 @@ class CustomStoppingCriteria(StoppingCriteria):
 
 
 def main(args):
+    print("\n\n\nInference\n\n\n")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     with open('data/paradetox/test.json', 'r') as f:
@@ -186,7 +189,8 @@ def main(args):
         with open(f'outputs/results_{args.output_file_name}.jsonl', 'a', encoding='utf-8') as f:
             json.dump(x, f, ensure_ascii=False)
             f.write("\n")
-    
+
+    print(f"Saving the output to outputs/results_{args.output_file_name}.jsonl")
         
 
 def parse_args():
