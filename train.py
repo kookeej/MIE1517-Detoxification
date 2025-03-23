@@ -53,6 +53,7 @@ def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterio
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
+        scheduler.step()
 
         logger.log({'train/loss': loss.item()})
         loss_list.append(loss.item())

@@ -49,7 +49,7 @@ class ParadetoxDatasetForTrain(Dataset):
 
             tokenized = self.tokenizer(
                 full_text,
-                return_tensors='pt'
+                return_tensors='pt',
             )
 
             input_ids = tokenized['input_ids'].squeeze(0)
@@ -57,7 +57,7 @@ class ParadetoxDatasetForTrain(Dataset):
 
             labels = input_ids.clone()
 
-            prompt_len = len(self.tokenizer(prompt, return_tensors='pt')['input_ids'].squeeze(0)) - 1
+            prompt_len = len(self.tokenizer(prompt, return_tensors='pt')['input_ids'].squeeze(0))
             labels[:prompt_len] = -100
 
             tokenized = {

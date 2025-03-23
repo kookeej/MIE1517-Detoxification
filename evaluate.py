@@ -139,7 +139,7 @@ def main(args):
     
     print(performance)
     
-    with open('performance_old.jsonl', 'a') as f:
+    with open('performance_new.jsonl', 'a') as f:
         json.dump(performance, f, ensure_ascii=False)
         f.write('\n')
     
