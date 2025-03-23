@@ -21,7 +21,7 @@ def wieting_sim(inputs, preds):
 
     max_sim_scores = []
     avg_sim_scores = []
-    for i in tqdm.tqdm(range(len(preds))):
+    for i in tqdm.tqdm(range(len(preds)), desc="wieting similarity score:"):
         sim_score_per_one = []
         for j in range(len(inputs[i])):
             s = sim_model.find_similarity([inputs[i][j]], [preds[i]])
@@ -37,7 +37,7 @@ def calc_sta(candidates):
     
     tokenizer = RobertaTokenizer.from_pretrained('SkolkovoInstitute/roberta_toxicity_classifier')
     model = RobertaForSequenceClassification.from_pretrained('SkolkovoInstitute/roberta_toxicity_classifier')
-    for i in tqdm.tqdm(range(0, len(candidates), 64)):
+    for i in tqdm.tqdm(range(0, len(candidates), 64), desc="style accuracy score:"):
         batch = tokenizer(candidates[i:i + 64], return_tensors='pt', padding=True)
         result = model(**batch)['logits'].argmax(1).float().data.tolist()
         results.extend([1 - item for item in result])
@@ -84,6 +84,7 @@ def calc_j(accuracy_by_sent, similarity_by_sent, cola_stats, candidates):
 
 
 def main(args):
+    print("\n\n\nEvaluate\n\n\n")
     outputs = []
     with open(f'outputs/results_{args.output_file_name}.jsonl', 'r') as f:
         for line in f:
@@ -138,7 +139,7 @@ def main(args):
     
     print(performance)
     
-    with open('performance.jsonl', 'a') as f:
+    with open('performance_old.jsonl', 'a') as f:
         json.dump(performance, f, ensure_ascii=False)
         f.write('\n')
     

@@ -6,6 +6,8 @@ from tqdm import tqdm
 from typing import Optional
 from nltk.translate.bleu_score import corpus_bleu
 
+import wandb
+
 import torch
 from torch.utils.data import Dataset, DataLoader
 from transformers import (
@@ -21,10 +23,11 @@ from dataset import ParadetoxDatasetForTrain, ParadetoxDatasetForEval
 from utils import set_randomness
 
 
-def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterion, device):
+def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterion, device, logger):
     # train
     model.train()
-    for idx, batch in enumerate(tqdm(dataloader)):
+    loss_list = []
+    for idx, batch in enumerate(tqdm(dataloader, desc='Training...')):
 
         optimizer.zero_grad()
 
@@ -38,7 +41,7 @@ def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterio
             )
         else:
             labels = batch['labels']
-            labels[labels == tokenizer.pad_token_id] = -100
+            # labels[labels == tokenizer.pad_token_id] = -100
             outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'], labels=labels)
             loss = outputs.loss
 
@@ -46,11 +49,17 @@ def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterio
         optimizer.step()
         scheduler.step()
 
+        logger.log({'train/loss': loss.item()})
+        loss_list.append(loss.item())
+
+    logger.log({'train/epoch_loss': sum(loss_list) / len(loss_list)})
+
+
 def generate(dataloader, model, tokenizer):
     model.eval()
     total_preds = []
     with torch.no_grad():
-        for idx, batch in enumerate(tqdm(dataloader)):
+        for idx, batch in enumerate(tqdm(dataloader, desc='Generating...')):
             outputs = model.generate(
                 **batch,
                 max_new_tokens=64,
@@ -59,10 +68,13 @@ def generate(dataloader, model, tokenizer):
                 top_p=0.9,
                 top_k=50,
                 do_sample=True,
+                eos_token_id=tokenizer.eos_token_id,
+                pad_token_id=tokenizer.pad_token_id,
             )
 
             generated_text = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-            # print(generated_text)
+            generated_text = [x.split('Neutral comment: ')[-1].strip().split("\n")[0].strip() for x in generated_text]
+
             total_preds.extend(generated_text)
     return total_preds
 
@@ -75,7 +87,7 @@ def valid_one_epoch(model, dataloader, tokenizer, raw_data, device):
     # ref_corpus = [[sent.split(' ') for sent in ref] for ref in ref_corpus]
     bleu_score = corpus_bleu(ref_corpus, candidates)
 
-    return bleu_score
+    return bleu_score, total_preds
 
 
 def inference(model, dataloader, output_file_name, tokenizer, raw_data, device):
@@ -89,7 +101,11 @@ def inference(model, dataloader, output_file_name, tokenizer, raw_data, device):
             json.dump(x, f, ensure_ascii=False)
             f.write("\n")
 
+    print(f"Saving the output to outputs/results_{output_file_name}.jsonl")
+
 def main(args):
+
+    print("\n\n\nTrain\n\n\n")
     if not os.path.exists('./checkpoints'):
         os.makedirs('./checkpoints')
     if not os.path.exists('./outputs'):
@@ -117,11 +133,11 @@ def main(args):
         model = T5ForConditionalGeneration.from_pretrained(args.base_model_name)
         model.to(device)
     else:
-        tokenizer = AutoTokenizer.from_pretrained(args.base_model_name, padding_side='left', truncation_size='left')
+        tokenizer = AutoTokenizer.from_pretrained(args.base_model_name, padding_side='left')
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model = AutoModelForCausalLM.from_pretrained(args.base_model_name, trust_remote_code=True,
-                                                     torch_dtype=torch.float16)
+                                                     torch_dtype=torch.bfloat16)
         model.to(device)
 
         # lora tuning configuration
@@ -154,10 +170,16 @@ def main(args):
     best_valid_score = -1
     patience = 0
 
+    logger = wandb.init(project="1517", name=args.output_file_name, config=args)
+
     for epoch in range(args.epochs):
+        print(f"Epoch {epoch + 1}/{args.epochs}")
         patience += 1
-        train_one_epoch(model, tokenizer, train_dataloader, optimizer, scheduler, criterion, device)
-        valid_score = valid_one_epoch(model, valid_dataloader, tokenizer=tokenizer, device=device, raw_data=valid)
+        train_one_epoch(model, tokenizer, train_dataloader, optimizer, scheduler, criterion, device, logger)
+        valid_score, valid_pred = valid_one_epoch(model, valid_dataloader, tokenizer=tokenizer, device=device, raw_data=valid)
+        logger.log({'valid/bleu': valid_score})
+        json.dump(valid_pred, open(f'outputs/valid_pred_{args.output_file_name}_epoch{epoch}.json', 'w'), indent=2,
+                  ensure_ascii=False)
 
         if best_valid_score < valid_score:
             patience = 0
@@ -170,7 +192,7 @@ def main(args):
 
             print(f'Best model saved (BLEU: {valid_score:.4f})')
 
-        if patience > 10:
+        if patience > 3:
             print(f"Early stopping at epoch {epoch + 1}")
             break
 
