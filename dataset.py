@@ -73,9 +73,9 @@ class ParadetoxDatasetForTrain(Dataset):
         attention_mask = [item['attention_mask'] for item in batch]
         labels = [item['labels'] for item in batch]
 
-        input_ids = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
-        attention_mask = torch.nn.utils.rnn.pad_sequence(attention_mask, batch_first=True, padding_value=0)
-        labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value=-100)
+        input_ids = left_pad(input_ids, pad_value=self.tokenizer.pad_token_id)
+        attention_mask = left_pad(attention_mask, pad_value=0)
+        labels = left_pad(labels, pad_value=-100)
 
         return {
             'input_ids': input_ids,
@@ -115,9 +115,6 @@ class ParadetoxDatasetForEval(Dataset):
 
             inputs = self.tokenizer(
                 prompt,
-                max_length=self.max_length,
-                padding='max_length',
-                truncation=True,
                 return_tensors='pt',
             )
 
@@ -129,10 +126,19 @@ class ParadetoxDatasetForEval(Dataset):
         input_ids = [item['input_ids'] for item in batch]
         attention_mask = [item['attention_mask'] for item in batch]
 
-        input_ids = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
-        attention_mask = torch.nn.utils.rnn.pad_sequence(attention_mask, batch_first=True, padding_value=0)
+        input_ids = left_pad(input_ids, pad_value=self.tokenizer.pad_token_id)
+        attention_mask = left_pad(attention_mask, pad_value=0)
 
         return {
             'input_ids': input_ids,
             'attention_mask': attention_mask,
         }
+
+def left_pad(tensors, pad_value):
+    max_len = max(t.size(0) for t in tensors)
+    padded = []
+    for t in tensors:
+        pad_len = max_len - t.size(0)
+        padding = torch.full((pad_len,), pad_value, dtype=t.dtype, device=t.device)
+        padded.append(torch.cat((padding, t), dim=0))
+    return torch.stack(padded)

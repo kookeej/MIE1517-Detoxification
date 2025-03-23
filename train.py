@@ -22,7 +22,7 @@ from peft import LoraConfig, get_peft_model, PeftModel
 
 from dataset import ParadetoxDatasetForTrain, ParadetoxDatasetForEval
 from utils import set_randomness
-
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterion, device, logger):
     # train
@@ -130,6 +130,11 @@ def main(args):
     with open('data/paradetox/test.json', 'r') as f:
         test = json.load(f)
 
+    if args.debug:
+        train = train[:200]
+        valid = train[:10]
+        test = test[:10]
+
     # flatten train
     train = [
         {'toxic': item['toxic'], 'neutral': ref}
@@ -186,6 +191,7 @@ def main(args):
         patience += 1
         train_one_epoch(model, tokenizer, train_dataloader, optimizer, scheduler, criterion, device, logger)
         valid_score, valid_pred = valid_one_epoch(model, valid_dataloader, tokenizer=tokenizer, device=device, raw_data=valid)
+        print(f"Validation BLEU: {valid_score:.4f}")
         logger.log({'valid/bleu': valid_score})
         json.dump(valid_pred, open(f'outputs/valid_pred_{args.output_file_name}_epoch{epoch}.json', 'w'), indent=2,
                   ensure_ascii=False)
@@ -227,6 +233,7 @@ def parse_args():
     parser.add_argument('--learning_rate', type=float, default=1e-4)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--debug', action='store_true')
 
     args = parser.parse_args()
 
