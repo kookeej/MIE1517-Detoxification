@@ -61,7 +61,7 @@ def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterio
     logger.log({'train/epoch_loss': sum(loss_list) / len(loss_list)})
 
 
-def generate(dataloader, model, tokenizer):
+def generate(dataloader, model, tokenizer, prompt_type):
     model.eval()
     total_preds = []
     with torch.no_grad():
@@ -79,17 +79,26 @@ def generate(dataloader, model, tokenizer):
                     do_sample=True,
                     eos_token_id=tokenizer.eos_token_id,
                     pad_token_id=tokenizer.pad_token_id,
+
                 )
 
                 generated_text = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-                generated_text = [x.split('Neutral comment: ')[-1].strip().split("\n")[0].strip() for x in generated_text]
+                if prompt_type == 'prev':
+                    splitter = 'Neutral comment: '
+                elif prompt_type == 'inst':
+                    splitter = 'assistant'
+                elif prompt_type == 'simple':
+                    splitter = 'Neutral comment: '
+                else:
+                    raise ValueError(f"Invalid prompt type: {prompt_type}")
 
+                generated_text = [x.split(splitter)[-1].strip().split("\n")[0].strip() for x in generated_text]
                 total_preds.extend(generated_text)
 
     return total_preds
 
-def valid_one_epoch(model, dataloader, tokenizer, raw_data, device):
-    total_preds = generate(dataloader, model, tokenizer)
+def valid_one_epoch(model, dataloader, tokenizer, raw_data, prompt_type):
+    total_preds = generate(dataloader, model, tokenizer, prompt_type)
 
     ref_corpus = [x['references'] for x in raw_data]
     ref_corpus = [[tokenizer.tokenize(sent) for sent in ref] for ref in ref_corpus]
@@ -100,8 +109,8 @@ def valid_one_epoch(model, dataloader, tokenizer, raw_data, device):
     return bleu_score, total_preds
 
 
-def inference(model, dataloader, output_file_name, tokenizer, raw_data, device):
-    total_preds = generate(dataloader, model, tokenizer)
+def inference(model, dataloader, output_file_name, tokenizer, raw_data, prompt_type):
+    total_preds = generate(dataloader, model, tokenizer, prompt_type)
 
     for i in range(len(total_preds)):
         x = raw_data[i].copy()
@@ -116,6 +125,7 @@ def inference(model, dataloader, output_file_name, tokenizer, raw_data, device):
 def main(args):
 
     print("\n\n\nTrain\n\n\n")
+
     if not os.path.exists('./checkpoints'):
         os.makedirs('./checkpoints')
     if not os.path.exists('./outputs'):
@@ -168,9 +178,9 @@ def main(args):
         model = get_peft_model(model, config)
         model.print_trainable_parameters()
 
-    train_dataset = ParadetoxDatasetForTrain(train, tokenizer)
-    valid_dataset = ParadetoxDatasetForEval(valid, tokenizer)
-    test_dataset = ParadetoxDatasetForEval(test, tokenizer)
+    train_dataset = ParadetoxDatasetForTrain(train, tokenizer, args.prompt_type)
+    valid_dataset = ParadetoxDatasetForEval(valid, tokenizer, args.prompt_type)
+    test_dataset = ParadetoxDatasetForEval(test, tokenizer, args.prompt_type)
 
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, collate_fn=train_dataset.collate_fn)
     valid_dataloader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=valid_dataset.collate_fn)
@@ -191,7 +201,7 @@ def main(args):
         print(f"Epoch {epoch + 1}/{args.epochs}")
         patience += 1
         train_one_epoch(model, tokenizer, train_dataloader, optimizer, scheduler, criterion, device, logger)
-        valid_score, valid_pred = valid_one_epoch(model, valid_dataloader, tokenizer=tokenizer, device=device, raw_data=valid)
+        valid_score, valid_pred = valid_one_epoch(model, valid_dataloader, tokenizer=tokenizer, raw_data=valid, prompt_type=args.prompt_type)
         print(f"Validation BLEU: {valid_score:.4f}")
         logger.log({'valid/bleu': valid_score})
         json.dump(valid_pred, open(f'outputs/valid_pred_{args.output_file_name}_epoch{epoch}.json', 'w'), indent=2,
@@ -222,7 +232,7 @@ def main(args):
         model.load_adapter(Path(f'./checkpoints/best_{args.output_file_name}/'), adapter_name='lora')
         model.to(device)
 
-    inference(model, test_dataloader, args.output_file_name, tokenizer, test, device)
+    inference(model, test_dataloader, args.output_file_name, tokenizer, test, args.prompt_type)
 
 
 def parse_args():
@@ -230,6 +240,7 @@ def parse_args():
 
     parser.add_argument('--seed', type=int, default=426)
     parser.add_argument('--base_model_name', type=str, default='t5-base')
+    parser.add_argument('--prompt_type', type=str, required=True)
     parser.add_argument('--output_file_name', type=str, required=True)
     parser.add_argument('--learning_rate', type=float, default=1e-4)
     parser.add_argument('--batch_size', type=int, default=32)

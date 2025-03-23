@@ -8,10 +8,12 @@ class ParadetoxDatasetForTrain(Dataset):
             self,
             data,
             tokenizer,
+            prompt_type
     ):
 
         self.tokenizer = tokenizer
         self.data = data
+        self.prompt_type = prompt_type
 
     def __len__(self):
         return len(self.data)
@@ -44,7 +46,15 @@ class ParadetoxDatasetForTrain(Dataset):
         else:
             toxic = self.data[idx]['toxic']
             neutral = self.data[idx]['neutral']
-            prompt = f"Your task is to review the given toxic comment and convert it into a polite, neutral sentence.\nToxic comment: {toxic} \nNeutral comment: "
+            if self.prompt_type == 'prev':
+                prompt = f"Your task is to review the given toxic comment and convert it into a polite, neutral sentence.\nToxic comment: {toxic} \nNeutral comment: "
+            elif self.prompt_type == "inst":
+                prompt = "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\nYou are an AI assistant tasked with converting toxic comments into polite, neutral sentences.<|eot_id|><|start_header_id|>user<|end_header_id|>\nToxic comment: " + toxic + "\nPlease provide a neutral version of the above comment.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
+            elif self.prompt_type == "simple":
+                prompt = "Toxic comment: " + toxic + "\nNeutral comment:"
+            else:
+                raise ValueError("prompt_type must be prev, inst or simple")
+
             full_text = prompt + neutral + self.tokenizer.eos_token
 
             tokenized = self.tokenizer(
@@ -89,10 +99,12 @@ class ParadetoxDatasetForEval(Dataset):
             self,
             data,
             tokenizer,
+            prompt_type
     ):
 
         self.tokenizer = tokenizer
         self.data = data
+        self.prompt_type = prompt_type
 
     def __len__(self):
         return len(self.data)
@@ -111,7 +123,14 @@ class ParadetoxDatasetForEval(Dataset):
             raise NotImplementedError
         else:
             toxic = self.data[idx]['toxic']
-            prompt = f"Your task is to review the given toxic comment and convert it into a polite, neutral sentence.\nToxic comment: {toxic} \nNeutral comment: "
+            if self.prompt_type == 'prev':
+                prompt = f"Your task is to review the given toxic comment and convert it into a polite, neutral sentence.\nToxic comment: {toxic} \nNeutral comment: "
+            elif self.prompt_type == "inst":
+                prompt = "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\nYou are an AI assistant tasked with converting toxic comments into polite, neutral sentences.<|eot_id|><|start_header_id|>user<|end_header_id|>\nToxic comment: " + toxic + "\nPlease provide a neutral version of the above comment.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
+            elif self.prompt_type == "simple":
+                prompt = "Toxic comment: " + toxic + "\nNeutral comment: "
+            else:
+                raise ValueError("prompt_type must be prev, inst or simple")
 
             inputs = self.tokenizer(
                 prompt,
