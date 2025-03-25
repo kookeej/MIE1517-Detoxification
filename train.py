@@ -21,6 +21,7 @@ from torch.amp import autocast, GradScaler
 from peft import LoraConfig, get_peft_model, PeftModel
 
 from dataset import ParadetoxDatasetForTrain, ParadetoxDatasetForEval
+from evaluate import evaluate
 from utils import set_randomness
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -55,10 +56,11 @@ def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterio
         scaler.update()
         scheduler.step()
 
-        logger.log({'train/loss': loss.item()})
         loss_list.append(loss.item())
-
-    logger.log({'train/epoch_loss': sum(loss_list) / len(loss_list)})
+        if logger is not None:
+            logger.log({'train/loss': loss.item()})
+    if logger is not None:
+        logger.log({'train/epoch_loss': sum(loss_list) / len(loss_list)})
 
 
 def generate(dataloader, model, tokenizer, prompt_type):
@@ -79,7 +81,6 @@ def generate(dataloader, model, tokenizer, prompt_type):
                     do_sample=True,
                     eos_token_id=tokenizer.eos_token_id,
                     pad_token_id=tokenizer.pad_token_id,
-
                 )
 
                 generated_text = tokenizer.batch_decode(outputs, skip_special_tokens=True)
@@ -121,6 +122,7 @@ def inference(model, dataloader, output_file_name, tokenizer, raw_data, prompt_t
             f.write("\n")
 
     print(f"Saving the output to outputs/results_{output_file_name}.jsonl")
+    return total_preds
 
 def main(args):
 
@@ -192,10 +194,13 @@ def main(args):
                                                 num_warmup_steps=len(train_dataloader) * 0.1)
     criterion = torch.nn.CrossEntropyLoss()
 
-    best_valid_score = -1
     patience = 0
+    best_valid_score = -1
 
-    logger = wandb.init(project="1517", name=args.output_file_name, config=args)
+    if args.wandb:
+        logger = wandb.init(project="1517", name=args.output_file_name, config=args)
+    else:
+        logger = None
 
     for epoch in range(args.epochs):
         print(f"Epoch {epoch + 1}/{args.epochs}")
@@ -203,12 +208,12 @@ def main(args):
         train_one_epoch(model, tokenizer, train_dataloader, optimizer, scheduler, criterion, device, logger)
         valid_score, valid_pred = valid_one_epoch(model, valid_dataloader, tokenizer=tokenizer, raw_data=valid, prompt_type=args.prompt_type)
         print(f"Validation BLEU: {valid_score:.4f}")
-        logger.log({'valid/bleu': valid_score})
+        if logger is not None:
+            logger.log({'valid/bleu': valid_score})
         json.dump(valid_pred, open(f'outputs/valid_pred_{args.output_file_name}_epoch{epoch}.json', 'w'), indent=2,
                   ensure_ascii=False)
 
         if best_valid_score < valid_score:
-            patience = 0
             best_valid_score = valid_score
 
             if isinstance(model, T5ForConditionalGeneration):
@@ -218,10 +223,9 @@ def main(args):
 
             print(f'Best model saved (BLEU: {valid_score:.4f})')
 
-        if patience > 3:
+        if patience > 1:
             print(f"Early stopping at epoch {epoch + 1}")
             break
-
     if 't5' in args.base_model_name:
         model = T5ForConditionalGeneration.from_pretrained(args.base_model_name)
         model.load_state_dict(torch.load(f'./checkpoints/best_{args.output_file_name}.pth'))
@@ -232,8 +236,12 @@ def main(args):
         model.load_adapter(Path(f'./checkpoints/best_{args.output_file_name}/'), adapter_name='lora')
         model.to(device)
 
-    inference(model, test_dataloader, args.output_file_name, tokenizer, test, args.prompt_type)
+    outputs = inference(model, test_dataloader, args.output_file_name, tokenizer, test, args.prompt_type)
+    performance = evaluate(outputs, test)
 
+    if logger is not None:
+        for k, v in performance:
+            logger.log({f'test/{k}': v})
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -245,6 +253,7 @@ def parse_args():
     parser.add_argument('--learning_rate', type=float, default=1e-4)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument("--wandb", action="store_true")
     parser.add_argument('--debug', action='store_true')
 
     args = parser.parse_args()
