@@ -5,7 +5,6 @@ import argparse
 
 from peft import PeftConfig, PeftModel
 from tqdm import tqdm
-from typing import Optional
 
 import chromadb
 
@@ -21,26 +20,16 @@ from transformers import (
 from dataset import ParadetoxDatasetForEval
 from evaluate import evaluate
 from train import inference
-from utils import set_randomness
+from utils import set_randomness, similarity_search
 
-def similarity_search(retrieval, collection, input_sentence, k):
-    input_embedding = retrieval.encode(input_sentence).tolist()
-    
-    results = collection.query(
-        query_embeddings=[input_embedding],
-        n_results=k
-    )
-    documents = results['metadatas'][0]
-    
-    return documents
 
 def main(args):
     print("\n\n\nInference\n\n\n")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
+
     with open('data/paradetox/test.json', 'r') as f:
         test = json.load(f)
-        
+
     # load tokenizer and model
     if 't5' in args.base_model_name:
         raise NotImplementedError
@@ -64,7 +53,7 @@ def main(args):
 
     dataset = ParadetoxDatasetForEval(test, prompt_type=args.prompt_type, tokenizer=tokenizer, examples=examples)
     dataloader = DataLoader(dataset, batch_size=16, shuffle=False, drop_last=False, collate_fn=dataset.collate_fn)
-                    
+
     model.eval()
 
     preds = inference(model, dataloader, args.output_file_name, tokenizer, test, args.prompt_type)
@@ -110,7 +99,7 @@ def generate_few_shots(shot_type, test):
             embedding = retrieval.encode(toxic_sentence).tolist()
 
             if str(idx) in existing_ids:
-                 continue
+                continue
 
             collection.add(
                 ids=[str(idx)],
@@ -126,22 +115,21 @@ def generate_few_shots(shot_type, test):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    
+
     parser.add_argument('--seed', type=int, default=426)
     parser.add_argument('--base_model_name', type=str, default='meta-llama/Llama-3.1-8B-Instruct')
     parser.add_argument("--model_name", type=str, default=None)
     parser.add_argument("--shot_type", type=str, choices=['zs', 'fs', 'ds'], default='zs')
     parser.add_argument('--prompt_type', type=str, default='inst')
     parser.add_argument('--output_file_name', type=str, required=True)
-    
+
     args = parser.parse_args()
-    
+
     return args
-    
-      
+
 
 if __name__ == '__main__':
     args = parse_args()
     set_randomness(args.seed)
-    
+
     main(args)

@@ -22,20 +22,14 @@ from peft import LoraConfig, get_peft_model, PeftModel
 
 from dataset import ParadetoxDatasetForTrain, ParadetoxDatasetForEval
 from evaluate import evaluate
+from utils import similarity_search
 from utils import set_randomness
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-####
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import chromadb
 from sentence_transformers import SentenceTransformer
 
-def similarity_search(retrieval, collection, input_sentence, k=3):
-    input_embedding = retrieval.encode(input_sentence).tolist()
-    results = collection.query(query_embeddings=[input_embedding], n_results=k)
-    return results['metadatas'][0]
-#####
 
-def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterion, device):# , logger):
 def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterion, device, logger):
     # train
     model.train()
@@ -59,7 +53,8 @@ def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterio
             with autocast(device_type='cuda', dtype=torch.bfloat16):
                 for k, v in batch.items():
                     batch[k] = v.to(device)
-                outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'], labels=batch['labels'])
+                outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'],
+                                labels=batch['labels'])
                 loss = outputs.loss
 
         scaler.scale(loss).backward()
@@ -109,6 +104,7 @@ def generate(dataloader, model, tokenizer, prompt_type):
 
     return total_preds
 
+
 def valid_one_epoch(model, dataloader, tokenizer, raw_data, prompt_type):
     total_preds = generate(dataloader, model, tokenizer, prompt_type)
 
@@ -123,6 +119,7 @@ def valid_one_epoch(model, dataloader, tokenizer, raw_data, prompt_type):
 
 def inference(model, dataloader, output_file_name, tokenizer, raw_data, prompt_type):
     total_preds = generate(dataloader, model, tokenizer, prompt_type)
+    total_output = []
 
     for i in range(len(total_preds)):
         x = raw_data[i].copy()
@@ -131,12 +128,13 @@ def inference(model, dataloader, output_file_name, tokenizer, raw_data, prompt_t
         with open(f'outputs/results_{output_file_name}.jsonl', 'a', encoding='utf-8') as f:
             json.dump(x, f, ensure_ascii=False)
             f.write("\n")
+        total_output.append(x)
 
     print(f"Saving the output to outputs/results_{output_file_name}.jsonl")
-    return total_preds
+    return total_output
+
 
 def main(args):
-
     print("\n\n\nTrain\n\n\n")
 
     if not os.path.exists('./checkpoints'):
@@ -165,25 +163,32 @@ def main(args):
         for item in train
         for ref in item['references']
     ]
-#######
-    train_examples = None
+
+    train_examples, val_examples, test_examples = None, None, None
     if args.use_demo_selection:
         print("Building DS example list for training...")
         retrieval = SentenceTransformer('all-MiniLM-L6-v2')
         chroma_client = chromadb.PersistentClient(path='./chroma_db')
+        chroma_client.delete_collection(name='train_ds_collection')
         collection = chroma_client.get_or_create_collection(name='train_ds_collection')
+        existing_ids = set(collection.get()['ids'])
 
         for idx, entry in enumerate(tqdm(train)):
             embedding = retrieval.encode(entry['toxic']).tolist()
+            if str(idx) in existing_ids:
+                continue
             collection.add(
                 ids=[str(idx)],
                 embeddings=[embedding],
-                metadatas=[{'toxic': entry['toxic'], 'reference': entry['neutral']}]
+                metadatas=[{'toxic': entry['toxic'], 'neutral': entry['neutral']}]
             )
-        train_examples = [similarity_search(retrieval, collection, ex['toxic'], k=3) for ex in tqdm(train)]
-#######
-
-    if 't5' in args.base_model_name:
+        train_examples = [similarity_search(retrieval, collection, ex['toxic'], k=3, query_id=str(idx)) for idx, ex in
+                          tqdm(enumerate(train), desc="Building DS example list for training...")]
+        print(train_examples[0])
+        val_examples = [similarity_search(retrieval, collection, ex['toxic'], k=3) for ex in
+                        tqdm(valid, desc="Building DS example list for validation...")]
+        test_examples = [similarity_search(retrieval, collection, ex['toxic'], k=3) for ex in
+                         tqdm(test, desc="Building DS example list for testing...")]
 
     if 't5' in args.base_model_name:
         tokenizer = T5Tokenizer.from_pretrained(args.base_model_name)
@@ -210,13 +215,16 @@ def main(args):
         model = get_peft_model(model, config)
         model.print_trainable_parameters()
 
-    train_dataset = ParadetoxDatasetForTrain(train, tokenizer, args.prompt_type)
-    valid_dataset = ParadetoxDatasetForEval(valid, tokenizer, args.prompt_type)
-    test_dataset = ParadetoxDatasetForEval(test, tokenizer, args.prompt_type)
+    train_dataset = ParadetoxDatasetForTrain(train, tokenizer, args.prompt_type, examples=train_examples)
+    valid_dataset = ParadetoxDatasetForEval(valid, tokenizer, args.prompt_type, examples=val_examples)
+    test_dataset = ParadetoxDatasetForEval(test, tokenizer, args.prompt_type, examples=test_examples)
 
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, collate_fn=train_dataset.collate_fn)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=valid_dataset.collate_fn)
-    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=test_dataset.collate_fn)
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4,
+                                  collate_fn=train_dataset.collate_fn)
+    valid_dataloader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4,
+                                  collate_fn=valid_dataset.collate_fn)
+    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4,
+                                 collate_fn=test_dataset.collate_fn)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     scheduler = get_linear_schedule_with_warmup(optimizer,
@@ -236,7 +244,8 @@ def main(args):
         print(f"Epoch {epoch + 1}/{args.epochs}")
         patience += 1
         train_one_epoch(model, tokenizer, train_dataloader, optimizer, scheduler, criterion, device, logger)
-        valid_score, valid_pred = valid_one_epoch(model, valid_dataloader, tokenizer=tokenizer, raw_data=valid, prompt_type=args.prompt_type)
+        valid_score, valid_pred = valid_one_epoch(model, valid_dataloader, tokenizer=tokenizer, raw_data=valid,
+                                                  prompt_type=args.prompt_type)
         print(f"Validation BLEU: {valid_score:.4f}")
         if logger is not None:
             logger.log({'valid/bleu': valid_score})
@@ -267,15 +276,16 @@ def main(args):
         model.to(device)
 
     outputs = inference(model, test_dataloader, args.output_file_name, tokenizer, test, args.prompt_type)
-    performance = evaluate(outputs, test)
+    performance = evaluate(outputs)
 
     if logger is not None:
         for k, v in performance:
             logger.log({f'test/{k}': v})
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
-    
+
     parser.add_argument('--seed', type=int, default=426)
     parser.add_argument('--base_model_name', type=str, default='t5-base')
     parser.add_argument('--prompt_type', type=str, required=True)
@@ -285,9 +295,6 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument('--debug', action='store_true')
-
-    parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--hybrid', action='store_true', help="Enable LoRA + partial full fine-tuning hybrid mode")
     parser.add_argument('--use_demo_selection', action='store_true')
 
     args = parser.parse_args()

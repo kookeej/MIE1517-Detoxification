@@ -95,7 +95,7 @@ def main(args):
         for line in f:
             outputs.append(json.loads(line))
 
-    evaluate(args, outputs)
+    evaluate(outputs)
 
 
 def evaluate(outputs, split_type='model'):

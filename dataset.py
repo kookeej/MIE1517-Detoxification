@@ -9,13 +9,13 @@ class ParadetoxDatasetForTrain(Dataset):
             data,
             tokenizer,
             prompt_type,
-            examples_list = None
+            examples=None,
     ):
 
         self.tokenizer = tokenizer
         self.data = data
         self.prompt_type = prompt_type
-        self.examples_list = examples_list  # default = None
+        self.examples = examples
 
     def __len__(self):
         return len(self.data)
@@ -48,22 +48,16 @@ class ParadetoxDatasetForTrain(Dataset):
         else:
             toxic = self.data[idx]['toxic']
             neutral = self.data[idx]['neutral']
+            shot = build_few_shot_prompt(self.examples[idx], self.prompt_type)
+
             if self.prompt_type == 'prev':
-                prompt = f"Your task is to review the given toxic comment and convert it into a polite, neutral sentence.\nToxic comment: {toxic} \nNeutral comment: "
+                prompt = f"Your task is to review the given toxic comment and convert it into a polite, neutral sentence.\n{shot}Toxic comment: {toxic} \nNeutral comment: "
             elif self.prompt_type == "inst":
-                prompt = "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\nYou are an AI assistant tasked with converting toxic comments into polite, neutral sentences.<|eot_id|><|start_header_id|>user<|end_header_id|>\nToxic comment: " + toxic + "\nPlease provide a neutral version of the above comment.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
+                prompt = f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\nYou are an AI assistant tasked with converting toxic comments into polite, neutral sentences.<|eot_id|><|start_header_id|>user<|end_header_id|>\n{shot}Toxic comment: {toxic}\nPlease provide a neutral version of the above comment.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
             elif self.prompt_type == "simple":
-                prompt = "Toxic comment: " + toxic + "\nNeutral comment:"
+                prompt = "Toxic comment: " + toxic + "\nNeutral comment: "
             else:
                 raise ValueError("prompt_type must be prev, inst or simple")
-
-            if self.examples_list is not None:
-                selected_demos = self.examples_list[idx]
-                demo_prompt = ""
-                for ex in selected_demos:
-                    demo_prompt += f"Toxic comment: {ex['toxic']}\nNeutral comment: {ex['reference']}\n\n"
-                prompt = demo_prompt + prompt
-
 
             full_text = prompt + neutral + self.tokenizer.eos_token
 
@@ -134,7 +128,7 @@ class ParadetoxDatasetForEval(Dataset):
             raise NotImplementedError
         else:
             toxic = self.data[idx]['toxic']
-            shot = build_few_shot_prompt(self.examples[idx])
+            shot = build_few_shot_prompt(self.examples[idx], self.prompt_type)
 
             if self.prompt_type == 'prev':
                 prompt = f"Your task is to review the given toxic comment and convert it into a polite, neutral sentence.\n{shot}Toxic comment: {toxic} \nNeutral comment: "
@@ -167,13 +161,16 @@ class ParadetoxDatasetForEval(Dataset):
         }
 
 
-def build_few_shot_prompt(examples):
+def build_few_shot_prompt(examples, prompt_type):
     shot = ''
     if examples is None:
         return shot
     for ex in examples:
         shot += f"Toxic comment: {ex['toxic']}\n"
-        shot += f"### Response: {ex['neutral']}\n"
+        if prompt_type == 'inst':
+            shot += f"### Response: {ex['neutral']}\n"
+        else:
+            shot += f"Neutral comment: {ex['neutral']}\n"
 
     return shot
 
