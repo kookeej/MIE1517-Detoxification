@@ -276,7 +276,7 @@ def main(args):
         model.to(device)
 
     outputs = inference(model, test_dataloader, args.output_file_name, tokenizer, test, args.prompt_type)
-    performance = evaluate(outputs)
+    performance = evaluate(outputs, args.base_model_name, args.output_file_name, args.split_type)
 
     if logger is not None:
         for k, v in performance:
