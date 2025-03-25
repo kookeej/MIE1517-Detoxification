@@ -95,16 +95,16 @@ def main(args):
         for line in f:
             outputs.append(json.loads(line))
 
-    evaluate(outputs)
+    evaluate(outputs, args.base_model_name, args.output_file_name, args.split_type)
 
 
-def evaluate(outputs, split_type='model'):
+def evaluate(outputs, base_model_name, output_file_name , split_type='model'):
     ref_corpus = [x['references'] for x in outputs]
     ref_sentence = [x['neutral1'] for x in outputs]
     candidates = [x['generation'] for x in outputs]
     if split_type == 'model':
 
-        tokenizer = AutoTokenizer.from_pretrained(args.base_model_name)
+        tokenizer = AutoTokenizer.from_pretrained(base_model_name)
 
         ref_corpus_tok = [[tokenizer.tokenize(sent) for sent in ref] for ref in ref_corpus]
         ref_sentence_tok = [tokenizer.tokenize(sent) for sent in ref_sentence]
@@ -129,9 +129,9 @@ def evaluate(outputs, split_type='model'):
     avg_j_score = calc_j(accuracy_by_sent, avg_similarity_by_sent, cola_stats, candidates)
     max_j_score = calc_j(accuracy_by_sent, max_similarity_by_sent, cola_stats, candidates)
     performance = {
-        'base_model_name': args.base_model_name,
-        'output_file_name': args.output_file_name,
-        'split_type': args.split_type,
+        'base_model_name': base_model_name,
+        'output_file_name': output_file_name,
+        'split_type': split_type,
         'bleu_corpus': float(bleu_corpus_score),
         'sta': float(sta_score),
         'avg_sim': float(avg_avg_sim_by_sent),
