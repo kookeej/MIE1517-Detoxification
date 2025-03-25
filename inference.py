@@ -69,7 +69,7 @@ def generate_few_shots(shot_type, test):
 
     elif shot_type == 'fs':
         examples = [
-            {
+           [{
                 "toxic": "im not gonna sell the fucking picture , i just want to contribute to the fucking article .",
                 "neutral": "I'm not going to sell the picture, I just want to contribute to the article.[END]"
             },
@@ -80,7 +80,7 @@ def generate_few_shots(shot_type, test):
             {
                 "toxic": "dude shut the fuck up talking , and get a life .",
                 "neutral": "Dude keep quiet and live[END]"
-            }
+            }] for _ in range(len(test))
         ]
 
     elif shot_type == 'ds':
