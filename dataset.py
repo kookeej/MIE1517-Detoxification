@@ -8,12 +8,14 @@ class ParadetoxDatasetForTrain(Dataset):
             self,
             data,
             tokenizer,
-            prompt_type
+            prompt_type,
+            examples_list = None
     ):
 
         self.tokenizer = tokenizer
         self.data = data
         self.prompt_type = prompt_type
+        self.examples_list = examples_list  # default = None
 
     def __len__(self):
         return len(self.data)
@@ -54,6 +56,14 @@ class ParadetoxDatasetForTrain(Dataset):
                 prompt = "Toxic comment: " + toxic + "\nNeutral comment:"
             else:
                 raise ValueError("prompt_type must be prev, inst or simple")
+
+            if self.examples_list is not None:
+                selected_demos = self.examples_list[idx]
+                demo_prompt = ""
+                for ex in selected_demos:
+                    demo_prompt += f"Toxic comment: {ex['toxic']}\nNeutral comment: {ex['reference']}\n\n"
+                prompt = demo_prompt + prompt
+
 
             full_text = prompt + neutral + self.tokenizer.eos_token
 

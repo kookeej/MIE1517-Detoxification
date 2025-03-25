@@ -25,6 +25,17 @@ from evaluate import evaluate
 from utils import set_randomness
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+####
+import chromadb
+from sentence_transformers import SentenceTransformer
+
+def similarity_search(retrieval, collection, input_sentence, k=3):
+    input_embedding = retrieval.encode(input_sentence).tolist()
+    results = collection.query(query_embeddings=[input_embedding], n_results=k)
+    return results['metadatas'][0]
+#####
+
+def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterion, device):# , logger):
 def train_one_epoch(model, tokenizer, dataloader, optimizer, scheduler, criterion, device, logger):
     # train
     model.train()
@@ -154,6 +165,25 @@ def main(args):
         for item in train
         for ref in item['references']
     ]
+#######
+    train_examples = None
+    if args.use_demo_selection:
+        print("Building DS example list for training...")
+        retrieval = SentenceTransformer('all-MiniLM-L6-v2')
+        chroma_client = chromadb.PersistentClient(path='./chroma_db')
+        collection = chroma_client.get_or_create_collection(name='train_ds_collection')
+
+        for idx, entry in enumerate(tqdm(train)):
+            embedding = retrieval.encode(entry['toxic']).tolist()
+            collection.add(
+                ids=[str(idx)],
+                embeddings=[embedding],
+                metadatas=[{'toxic': entry['toxic'], 'reference': entry['neutral']}]
+            )
+        train_examples = [similarity_search(retrieval, collection, ex['toxic'], k=3) for ex in tqdm(train)]
+#######
+
+    if 't5' in args.base_model_name:
 
     if 't5' in args.base_model_name:
         tokenizer = T5Tokenizer.from_pretrained(args.base_model_name)
@@ -232,7 +262,7 @@ def main(args):
         model.to(device)
     else:
         model = AutoModelForCausalLM.from_pretrained(args.base_model_name, trust_remote_code=True,
-                                                     torch_dtype=torch.float16)
+                                                     torch_dtype=torch.bfloat16)
         model.load_adapter(Path(f'./checkpoints/best_{args.output_file_name}/'), adapter_name='lora')
         model.to(device)
 
@@ -245,7 +275,7 @@ def main(args):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-
+    
     parser.add_argument('--seed', type=int, default=426)
     parser.add_argument('--base_model_name', type=str, default='t5-base')
     parser.add_argument('--prompt_type', type=str, required=True)
@@ -255,6 +285,10 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument('--debug', action='store_true')
+
+    parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--hybrid', action='store_true', help="Enable LoRA + partial full fine-tuning hybrid mode")
+    parser.add_argument('--use_demo_selection', action='store_true')
 
     args = parser.parse_args()
 
