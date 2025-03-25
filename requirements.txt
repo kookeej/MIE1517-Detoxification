@@ -1,0 +1,8 @@
+tqdm
+nltk
+peft
+transformers
+accelerate
+chromadb
+sentence-transformers
+sentencepiece
