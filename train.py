@@ -254,6 +254,7 @@ def main(args):
 
         if best_valid_score < valid_score:
             best_valid_score = valid_score
+            patience = 0
 
             if isinstance(model, T5ForConditionalGeneration):
                 torch.save(model.state_dict(), f'./checkpoints/best_{args.output_file_name}.pth')
