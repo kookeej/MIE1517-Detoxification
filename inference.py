@@ -57,7 +57,7 @@ def main(args):
     model.eval()
 
     preds = inference(model, dataloader, args.output_file_name, tokenizer, test, args.prompt_type)
-    performance = evaluate(preds)
+    performance = evaluate(preds, args.base_model_name, args.output_file_name)
 
     print(performance)
     return performance
@@ -65,7 +65,7 @@ def main(args):
 
 def generate_few_shots(shot_type, test):
     if shot_type == 'zs':
-        examples = None
+        examples = [None for _ in range(len(test))]
 
     elif shot_type == 'fs':
         examples = [
