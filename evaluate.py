@@ -105,11 +105,9 @@ def evaluate(outputs, base_model_name, output_file_name , split_type='model'):
     if split_type == 'model':
 
         tokenizer = AutoTokenizer.from_pretrained(base_model_name)
-
         ref_corpus_tok = [[tokenizer.tokenize(sent) for sent in ref] for ref in ref_corpus]
         ref_sentence_tok = [tokenizer.tokenize(sent) for sent in ref_sentence]
         candidates_tok = [tokenizer.tokenize(sent) for sent in candidates]
-
     elif split_type == 'split':
         raise NotImplementedError
         ref_corpus_tok = [[sent.split(' ') for sent in ref] for ref in ref_corpus]

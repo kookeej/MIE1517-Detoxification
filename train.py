@@ -254,6 +254,7 @@ def main(args):
 
         if best_valid_score < valid_score:
             best_valid_score = valid_score
+            patience = 0
 
             if isinstance(model, T5ForConditionalGeneration):
                 torch.save(model.state_dict(), f'./checkpoints/best_{args.output_file_name}.pth')
@@ -276,7 +277,7 @@ def main(args):
         model.to(device)
 
     outputs = inference(model, test_dataloader, args.output_file_name, tokenizer, test, args.prompt_type)
-    performance = evaluate(outputs, args.base_model_name, args.output_file_name, args.split_type)
+    performance = evaluate(outputs, args.base_model_name, args.output_file_name)
 
     if logger is not None:
         for k, v in performance:
