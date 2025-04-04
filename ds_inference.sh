@@ -1,7 +1,7 @@
 export MODEL_NAME=
 export BASE_MODEL=
-export SHOT_TYPE=ds
-export PROMPT_TYPE-
+export SHOT_TYPE= # ds, 
+export PROMPT_TYPE= # prev, inst
 export OUTPUT_FILE_NAME=
 export CUDA_VISIBLE_DEVICES=
 
