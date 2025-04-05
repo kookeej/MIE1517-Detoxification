@@ -1,6 +1,6 @@
 export MODEL_NAME=llama_elephant
 export LR=5e-5
-export WANDB_API_KEY=1364bc3808835e00258645d1d878f3a919d3d4a2
+export WANDB_API_KEY='write your wandb api key'
 export CUDA_VISIBLE_DEVICES=0
 
 python train.py --seed 426 \
