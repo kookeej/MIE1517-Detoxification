@@ -2,11 +2,24 @@
 ```bash
 # train.py
 python train.py --seed 426 \
-                --base_model_name [BASE_MODEL_NAME] \   # t5-base
+                --base_model_name [BASE_MODEL_NAME] \   # t5-base, meta-llama/Llama-3.1-8B-Instruct
                 --output_file_name [OUTPUT_FILE_NAME] \ # t5base
                 --learning_rate 1e-4 \
                 --batch_size 32 \
-                --epochs 50
+                --epochs 50 \
+                --prompt_type [PROMPT_TYPE] # pred, inst
+```
+```bash
+# DS Train
+# train.py
+python train.py --seed 426 \
+                --base_model_name [BASE_MODEL_NAME] \   # t5-base, meta-llama/Llama-3.1-8B-Instruct
+                --output_file_name [OUTPUT_FILE_NAME] \ # t5base
+                --learning_rate 1e-4 \
+                --batch_size 32 \
+                --epochs 50 \
+                --prompt_type [PROMPT_TYPE] \ # pred, inst
+                --use_demo_selection 
 ```
 
 ```bash
@@ -19,11 +32,18 @@ python inference.py --seed 426 \
 
 ```bash
 # evaluate.py
-python evaluate.py --base_model_name [BASE_MODEL_NAME] \ # 사용한 LM명
+python evaluate.py --base_model_name [BASE_MODEL_NAME] \ # LM name used ex) meta-llama/Llama-3.1-8B-Instruct
                   --split_type [SPLIT_TYPE] \ # model
-                  --output_file_name \ # 평가하고자 하는 output_file_name 그대로 작성하면 됨. 
+                  --output_file_name \ # Just write the output_file_name you want to evaluate as is.
 ```
 
 
-### 추가 설명
-* output file은 `outputs/results_{output_file_name}.jsonl`으로 저장됨
+
+### Supplementary explanation
+* The output file is saved as `outputs/results_{output_file_name}.jsonl`.
+
+* To perform training and evaluation in one step, use `train_3.sh`.
+
+* To run inference and evaluation with Demo Selection on a trained LLaMA model, use `ds_inference.sh`.
+
+* To train a LLaMA model with Demo Selection, use `ds_train.sh`.
